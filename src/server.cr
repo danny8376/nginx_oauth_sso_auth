@@ -77,20 +77,20 @@ module Server
 
   def self.back_cookie(uri)
     cookies = HTTP::Cookies.new
-    cookies["#{@@conf.cookie.name}XBACK"] = uri
+    cookies << HTTP::Cookie.new("#{@@conf.cookie.name}XBACK", uri, secure: true)
     cookies
   end
 
   def self.gen_cookie(json)
     obj = JSON.parse json
     cookies = HTTP::Cookies.new
-    cookies[@@conf.cookie.name] = digest_cookie(JSON.build { |json|
+    cookies << HTTP::Cookie.new(@@conf.cookie.name, digest_cookie(JSON.build { |json|
       json.object do
         @@conf.cookie.field.split("|").each do |f|
           json.field f, obj[f]
         end
       end
-    })
+    }), secure: true)
     cookies
   end
 
