@@ -68,7 +68,7 @@ module Server
     case sym
     when "="
       return target.as_s == val
-    when "?"
+    when "~"
       val.split(",") do |v|
         return target.as_a.includes? v
       end
@@ -96,10 +96,11 @@ module Server
 
   def self.handle_request(context)
     case context.request.path
-    when /^#{@@conf.prefix}\/check/ # nginx auth_request handler
+    when /^#{@@conf.prefix}\/check(?:\/(?<rule>.+))?/ # nginx auth_request handler
       if context.request.cookies.has_key? @@conf.cookie.name
         cookie = extract_cookie context.request.cookies[@@conf.cookie.name]
-        if !cookie.empty? && auth_cookie cookie, context.request.headers["X-AuthRule"]
+        rule = $~["rule"]? || context.request.headers["X-AuthRule"] || "none|=|none"
+        if !cookie.empty? && auth_cookie cookie, rule
           context.response.status_code = 200
           context.response.print "OK"
         else
