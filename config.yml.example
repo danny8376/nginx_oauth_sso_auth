@@ -1,0 +1,15 @@
+bind:
+  host: 127.0.0.1
+  port: 54321
+oauth:
+  auth_url: https://example.com/oauth2/authorize
+  token_url: https://example.com/oauth2/token
+  user_url: https://example.com/oauth2/userinfo
+  client_id: client_id
+  client_secret: client_secret
+  scope: openid
+cookie:
+  name: OAUTHSSOAUTHSESS
+  secret: _change_this_to_random_32_chars_
+  field: username|group
+prefix: /oauth_sso_auth
