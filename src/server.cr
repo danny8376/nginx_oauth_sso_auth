@@ -77,7 +77,7 @@ module Server
 
   def self.back_cookie(uri)
     cookies = HTTP::Cookies.new
-    cookies << HTTP::Cookie.new("#{@@conf.cookie.name}XBACK", uri, secure: true)
+    cookies << HTTP::Cookie.new("#{@@conf.cookie.name}XBACK", uri, secure: true, http_only: true)
     cookies
   end
 
@@ -90,7 +90,7 @@ module Server
           json.field f, obj[f]
         end
       end
-    }), secure: true)
+    }), secure: true, http_only: true)
     cookies
   end
 
