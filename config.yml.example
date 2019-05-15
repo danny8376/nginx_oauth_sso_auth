@@ -7,9 +7,11 @@ oauth:
   user_url: https://example.com/oauth2/userinfo
   client_id: client_id
   client_secret: client_secret
-  scope: openid
+  scope: openid roles
 cookie:
   name: OAUTHSSOAUTHSESS
-  secret: _change_this_to_random_32_chars_
-  field: username|group
+  secure: true
+  # gen random base64 encoded (at least) 32 bytes with `openssl rand -base64 32` for secret
+  secret: X2NoYW5nZV90aGlzX3RvX3JhbmRvbV8zMl9jaGFyc18K
+  field: username|roles
 prefix: /oauth_sso_auth

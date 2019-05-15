@@ -6,6 +6,14 @@ require "yaml"
 require "json"
 
 module Server
+  module Base64Decoder
+    def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Bytes
+      unless node.is_a?(YAML::Nodes::Scalar)
+        node.raise "Expected scalar, not #{node.class}"
+      end
+      Base64.decode(node.value)
+    end
+  end
   struct Config
     struct Bind
       YAML.mapping(
@@ -26,7 +34,11 @@ module Server
     struct Cookie
       YAML.mapping(
         name:   String,
-        secret: String,
+        secure: Bool,
+        secret: {
+          type: Bytes,
+          converter: Base64Decoder,
+        },
         field:  String,
       )
     end
@@ -75,23 +87,25 @@ module Server
     end
   end
 
-  def self.back_cookie(uri)
+  def self.gen_cookie(name, data)
     cookies = HTTP::Cookies.new
-    cookies << HTTP::Cookie.new("#{@@conf.cookie.name}XBACK", uri, secure: true, http_only: true)
+    cookies << HTTP::Cookie.new(name, data, secure: @@conf.cookie.secure, http_only: true)
     cookies
   end
 
-  def self.gen_cookie(json)
+  def self.gen_cookie_back(uri)
+    gen_cookie("#{@@conf.cookie.name}XBACK", uri)
+  end
+
+  def self.gen_cookie_auth(json)
     obj = JSON.parse json
-    cookies = HTTP::Cookies.new
-    cookies << HTTP::Cookie.new(@@conf.cookie.name, digest_cookie(JSON.build { |json|
+    gen_cookie(@@conf.cookie.name, digest_cookie(JSON.build { |json|
       json.object do
         @@conf.cookie.field.split("|").each do |f|
           json.field f, obj[f]
         end
       end
-    }), secure: true, http_only: true)
-    cookies
+    }))
   end
 
   def self.handle_request(context)
@@ -114,7 +128,7 @@ module Server
     when /^#{@@conf.prefix}\/login/
       query = context.request.query || ""
       if !query.empty?
-        back_cookie(query).add_response_headers context.response.headers
+        gen_cookie_back(query).add_response_headers context.response.headers
       end
       context.response.status_code = 302
       context.response.headers["Location"] =
@@ -142,7 +156,7 @@ module Server
           else
             res = HTTP::Client.get @@conf.oauth.user_url, HTTP::Headers{"Authorization" => "Bearer #{token.as_s}"}
             if res.status_code == 200
-              gen_cookie(res.body).add_response_headers context.response.headers
+              gen_cookie_auth(res.body).add_response_headers context.response.headers
               if context.request.cookies.has_key? "#{@@conf.cookie.name}XBACK"
                 context.response.status_code = 302
                 context.response.headers["Location"] = context.request.cookies["#{@@conf.cookie.name}XBACK"].value
