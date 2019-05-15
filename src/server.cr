@@ -39,6 +39,8 @@ module Server
           type: Bytes,
           converter: Base64Decoder,
         },
+        refresh_time: Int32,
+        valid_time:   Int32,
         field:  String,
       )
     end
@@ -57,34 +59,57 @@ module Server
   end
 
   DIGEST_ALG = :sha256
-  DIGEST_B64_LEN = 44
-  # base64 digest => 44 chars
+  DIGEST_LEN = 32
+  AUTH_PREFIX_LEN = 32 + 8 # digest + unix(int64)
 
-  def self.digest_cookie(cookie)
-    Base64.strict_encode(OpenSSL::HMAC.digest(DIGEST_ALG, @@conf.cookie.secret, cookie)) + cookie
+  def self.digest_cookie_auth(data, time = Time.utc_now)
+    slice = data.to_slice
+    auth = Bytes.new(AUTH_PREFIX_LEN + slice.bytesize)
+    io = IO::Memory.new(auth)
+    io.skip DIGEST_LEN
+    io.write_bytes time.to_unix
+    io.write slice
+    io.rewind
+    digest = OpenSSL::HMAC.digest(DIGEST_ALG, @@conf.cookie.secret, auth)
+    io.write digest
+    auth
   end
 
-  def self.extract_cookie(cookie)
-    digest = cookie.value
-    return "" if digest.size <= DIGEST_B64_LEN
-    val = digest[DIGEST_B64_LEN..-1]
-    return "" if digest != digest_cookie val
-    return val
-  end
+  def self.check_cookie_auth(cookie, rule) # (return) code, cookie_refresh
+    refresh = nil
 
-  def self.auth_cookie(cookie, rule)
-    json = JSON.parse cookie
+    auth = Base64.decode cookie.value
+    return 401, refresh if auth.bytesize <= AUTH_PREFIX_LEN
+
+    io = IO::Memory.new(auth)
+    io.skip DIGEST_LEN # skip digest
+    time = Time.unix io.read_bytes(Int64)
+    data = io.read_string(auth.bytesize - AUTH_PREFIX_LEN)
+    return 401, refresh if auth != digest_cookie_auth(data, time)
+
+    now = Time.utc_now
+    span = (now - time).seconds
+    return 401, refresh if span > @@conf.cookie.valid_time
+
+    if span > @@conf.cookie.refresh_time
+      refresh = refresh_cookie_auth digest_cookie_auth(data)
+    end
+
+    json = JSON.parse data
     key, sym, val = rule.split("|")
     target = json[key]?
-    return false if target.nil?
+    return 403, refresh if target.nil?
     case sym
     when "="
-      return target.as_s == val
+      return (target.as_s == val ? 200 : 403), refresh
     when "~"
       val.split(",") do |v|
-        return target.as_a.includes? v
+        if target.as_a.includes?(v)
+          return 200, refresh
+        end
       end
     end
+    return 403, refresh
   end
 
   def self.gen_cookie(name, data)
@@ -97,31 +122,42 @@ module Server
     gen_cookie("#{@@conf.cookie.name}XBACK", uri)
   end
 
+  def self.refresh_cookie_auth(auth)
+    gen_cookie(@@conf.cookie.name, Base64.urlsafe_encode(auth, false))
+  end
+
   def self.gen_cookie_auth(json)
     obj = JSON.parse json
-    gen_cookie(@@conf.cookie.name, digest_cookie(JSON.build { |json|
+    gen_cookie(@@conf.cookie.name, Base64.urlsafe_encode(digest_cookie_auth(JSON.build { |json|
       json.object do
         @@conf.cookie.field.split("|").each do |f|
           json.field f, obj[f]
         end
       end
-    }))
+    }), false))
   end
 
   def self.handle_request(context)
     case context.request.path
     when /^#{@@conf.prefix}\/check(?:\/(?<rule>.+))?/ # nginx auth_request handler
       if context.request.cookies.has_key? @@conf.cookie.name
-        cookie = extract_cookie context.request.cookies[@@conf.cookie.name]
+        cookie = context.request.cookies[@@conf.cookie.name]
         rule = $~["rule"]? || context.request.headers["X-AuthRule"] || "none|=|none"
-        if !cookie.empty? && auth_cookie cookie, rule
-          context.response.status_code = 200
-          context.response.print "OK"
-        else
-          context.response.status_code = 403
-          context.response.print "access denied"
+        code, refresh = check_cookie_auth cookie, rule
+        unless refresh.nil?
+          refresh.add_response_headers context.response.headers
         end
       else
+        code = 401
+      end
+      case code
+      when 200
+        context.response.status_code = 200
+        context.response.print "OK"
+      when 403
+        context.response.status_code = 403
+        context.response.print "access denied"
+      when 401
         context.response.status_code = 401
         context.response.print "Auth required"
       end

@@ -13,5 +13,7 @@ cookie:
   secure: true
   # gen random base64 encoded (at least) 32 bytes with `openssl rand -base64 32` for secret
   secret: X2NoYW5nZV90aGlzX3RvX3JhbmRvbV8zMl9jaGFyc18K
+  refresh_time: 60
+  valid_time: 3600
   field: username|roles
 prefix: /oauth_sso_auth
