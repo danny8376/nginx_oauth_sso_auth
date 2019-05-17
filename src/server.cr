@@ -110,12 +110,16 @@ module Server
       end
     end
     return 403, refresh
+  rescue ArgumentError # from Time.unix ?
+    return 401, nil # wrong cookie format, auth again
+  rescue TypeCastError # from JSON::Any as_a/as_s ?
+    return 401, nil # wrong json payload, auth again
+  rescue Base64::Error | IO::EOFError | JSON::ParseException
+    return 401, nil # wrong cookie format, auth again
   end
 
   def self.gen_cookie(name, data)
-    cookies = HTTP::Cookies.new
-    cookies << HTTP::Cookie.new(name, data, secure: @@conf.cookie.secure, http_only: true)
-    cookies
+    HTTP::Cookie.new(name, data, secure: @@conf.cookie.secure, http_only: true)
   end
 
   def self.gen_cookie_back(uri)
@@ -135,6 +139,9 @@ module Server
         end
       end
     }), false))
+  # wrong config or bad oauth server, lazy to handle this
+  # (shouldn't happen, or not our fault, isn't it?)
+  #rescue JSON::ParseException
   end
 
   def self.handle_request(context)
@@ -145,7 +152,7 @@ module Server
         rule = $~["rule"]? || context.request.headers["X-AuthRule"] || "none|=|none"
         code, refresh = check_cookie_auth cookie, rule
         unless refresh.nil?
-          refresh.add_response_headers context.response.headers
+          context.response.cookies << refresh
         end
       else
         code = 401
@@ -164,7 +171,7 @@ module Server
     when /^#{@@conf.prefix}\/login/
       query = context.request.query || ""
       if !query.empty?
-        gen_cookie_back(query).add_response_headers context.response.headers
+        context.response.cookies << gen_cookie_back(query)
       end
       context.response.status_code = 302
       context.response.headers["Location"] =
@@ -192,7 +199,7 @@ module Server
           else
             res = HTTP::Client.get @@conf.oauth.user_url, HTTP::Headers{"Authorization" => "Bearer #{token.as_s}"}
             if res.status_code == 200
-              gen_cookie_auth(res.body).add_response_headers context.response.headers
+              context.response.cookies << gen_cookie_auth(res.body)
               if context.request.cookies.has_key? "#{@@conf.cookie.name}XBACK"
                 context.response.status_code = 302
                 context.response.headers["Location"] = context.request.cookies["#{@@conf.cookie.name}XBACK"].value
