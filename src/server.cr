@@ -14,6 +14,14 @@ module Server
       Base64.decode(node.value)
     end
   end
+  module RegexParser
+    def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Regex
+      unless node.is_a?(YAML::Nodes::Scalar)
+        node.raise "Expected scalar, not #{node.class}"
+      end
+      Regex.new(node.value)
+    end
+  end
   struct Config
     struct Bind
       YAML.mapping(
@@ -29,6 +37,10 @@ module Server
         client_id:     String,
         client_secret: String,
         scope:         String,
+        ip_whitelist: {
+          type: Regex,
+          converter: RegexParser,
+        },
       )
     end
     struct Cookie
@@ -147,7 +159,9 @@ module Server
   def self.handle_request(context)
     case context.request.path
     when /^#{@@conf.prefix}\/check(?:\/(?<rule>.+))?/ # nginx auth_request handler
-      if context.request.cookies.has_key? @@conf.cookie.name
+      if context.request.headers.has_key?("X-Real-IP") && @@conf.oauth.ip_whitelist.match(context.request.headers["X-Real-IP"])
+        code = 200
+      elsif context.request.cookies.has_key? @@conf.cookie.name
         cookie = context.request.cookies[@@conf.cookie.name]
         rule = $~["rule"]? || context.request.headers["X-AuthRule"] || "none|=|none"
         code, refresh = check_cookie_auth cookie, rule

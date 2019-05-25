@@ -8,6 +8,8 @@ oauth:
   client_id: client_id
   client_secret: client_secret
   scope: openid roles
+  # match with RegEx
+  ip_whitelist: ^(127\.0\.0\.1|::1)$
 cookie:
   name: OAUTHSSOAUTHSESS
   secure: true
