@@ -159,11 +159,11 @@ module Server
   def self.handle_request(context)
     case context.request.path
     when /^#{@@conf.prefix}\/check(?:\/(?<rule>.+))?/ # nginx auth_request handler
+      rule = $~["rule"]? || context.request.headers["X-AuthRule"]? || "none|=|none"
       if context.request.headers.has_key?("X-Real-IP") && @@conf.oauth.ip_whitelist.match(context.request.headers["X-Real-IP"])
         code = 200
       elsif context.request.cookies.has_key? @@conf.cookie.name
         cookie = context.request.cookies[@@conf.cookie.name]
-        rule = $~["rule"]? || context.request.headers["X-AuthRule"] || "none|=|none"
         code, refresh = check_cookie_auth cookie, rule
         unless refresh.nil?
           context.response.cookies << refresh
