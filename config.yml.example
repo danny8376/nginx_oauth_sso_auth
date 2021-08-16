@@ -1,6 +1,9 @@
 bind:
   host: 127.0.0.1
   port: 54321
+  # leave unix empty to use tcp, otherwise with unix socket
+  unix:
+  perm: 0o777
 oauth:
   auth_url: https://example.com/oauth2/authorize
   token_url: https://example.com/oauth2/token

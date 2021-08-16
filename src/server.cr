@@ -232,18 +232,26 @@ module Server
     end
   end
 
-  def self.start_server(host = "", port = -1)
+  def self.start_server(host = "", port = -1, unix = "", perm = -1)
     load_config
 
     host = @@conf.bind.host if host.empty?
     port = @@conf.bind.port if port < 0
+    unix = @@conf.bind.unix if unix.empty?
+    perm = @@conf.bind.perm if perm < 0
 
     server = HTTP::Server.new([
       HTTP::ErrorHandler.new ENV["ENV"] == "debug",
     ]) { |context| handle_request context }
 
-    puts "Listening on http://#{host}:#{port}"
-    server.bind_tcp host, port
+    if unix.empty?
+      puts "Listening on http://#{host}:#{port}"
+      server.bind_tcp host, port
+    else
+      puts "Listening on http://unix:#{File.expand_path unix}"
+      server.bind_unix unix
+      File.chmod unix, perm
+    end
     server.listen
   end
 end
