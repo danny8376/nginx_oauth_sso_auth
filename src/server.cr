@@ -6,62 +6,56 @@ require "yaml"
 require "json"
 
 module Server
-  module Base64Decoder
-    def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Bytes
-      unless node.is_a?(YAML::Nodes::Scalar)
-        node.raise "Expected scalar, not #{node.class}"
-      end
-      Base64.decode(node.value)
-    end
-  end
-  module RegexParser
-    def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Regex
-      unless node.is_a?(YAML::Nodes::Scalar)
-        node.raise "Expected scalar, not #{node.class}"
-      end
-      Regex.new(node.value)
-    end
-  end
   struct Config
+    module Base64Decoder
+      def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Bytes
+        unless node.is_a?(YAML::Nodes::Scalar)
+          node.raise "Expected scalar, not #{node.class}"
+        end
+        Base64.decode(node.value)
+      end
+    end
+    module RegexParser
+      def self.from_yaml(ctx : YAML::ParseContext, node : YAML::Nodes::Node) : Regex
+        unless node.is_a?(YAML::Nodes::Scalar)
+          node.raise "Expected scalar, not #{node.class}"
+        end
+        Regex.new(node.value)
+      end
+    end
     struct Bind
-      YAML.mapping(
-        host:   String,
-        port:   Int32,
-      )
+      include YAML::Serializable
+      property host : String
+      property port : Int32
+      property unix : String
+      property perm : Int16
     end
     struct OAuth
-      YAML.mapping(
-        auth_url:      String,
-        token_url:     String,
-        user_url:      String,
-        client_id:     String,
-        client_secret: String,
-        scope:         String,
-        ip_whitelist: {
-          type: Regex,
-          converter: RegexParser,
-        },
-      )
+      include YAML::Serializable
+      property auth_url      : String
+      property token_url     : String
+      property user_url      : String
+      property client_id     : String
+      property client_secret : String
+      property scope         : String
+      @[YAML::Field(converter: Server::Config::RegexParser)]
+      property ip_whitelist  : Regex
     end
     struct Cookie
-      YAML.mapping(
-        name:   String,
-        secure: Bool,
-        secret: {
-          type: Bytes,
-          converter: Base64Decoder,
-        },
-        refresh_time: Int32,
-        valid_time:   Int32,
-        field:  String,
-      )
+      include YAML::Serializable
+      property name   : String
+      property secure : Bool
+      @[YAML::Field(converter: Server::Config::Base64Decoder)]
+      property secret : Bytes
+      property refresh_time : Int32
+      property valid_time   : Int32
+      property field  : String
     end
-    YAML.mapping(
-      bind:    Bind,
-      oauth:   OAuth,
-      cookie:  Cookie,
-      prefix:  String,
-    )
+    include YAML::Serializable
+    property bind   : Bind
+    property oauth  : OAuth
+    property cookie : Cookie
+    property prefix : String
   end
 
   # read example as default config value 030
@@ -70,11 +64,11 @@ module Server
     @@conf = Config.from_yaml yaml
   end
 
-  DIGEST_ALG = :sha256
+  DIGEST_ALG = OpenSSL::Algorithm::SHA256
   DIGEST_LEN = 32
   AUTH_PREFIX_LEN = 32 + 8 # digest + unix(int64)
 
-  def self.digest_cookie_auth(data, time = Time.utc_now)
+  def self.digest_cookie_auth(data, time = Time.utc)
     slice = data.to_slice
     auth = Bytes.new(AUTH_PREFIX_LEN + slice.bytesize)
     io = IO::Memory.new(auth)
@@ -99,7 +93,7 @@ module Server
     data = io.read_string(auth.bytesize - AUTH_PREFIX_LEN)
     return 401, refresh if auth != digest_cookie_auth(data, time)
 
-    now = Time.utc_now
+    now = Time.utc
     span = (now - time).seconds
     return 401, refresh if span > @@conf.cookie.valid_time
 
@@ -193,7 +187,7 @@ module Server
           response_type: "code",
           client_id: @@conf.oauth.client_id,
           scope: @@conf.oauth.scope,
-          redirect_uri: "https://#{context.request.host}#{@@conf.prefix}/callback",
+          redirect_uri: "https://#{context.request.headers["Host"]?}#{@@conf.prefix}/callback",
         })}"
       context.response.print "Redirect to SSO"
     when /^#{@@conf.prefix}\/callback/
@@ -203,7 +197,7 @@ module Server
           grant_type: "authorization_code",
           client_id: @@conf.oauth.client_id,
           client_secret: @@conf.oauth.client_secret,
-          redirect_uri: "https://#{context.request.host}#{@@conf.prefix}/callback",
+          redirect_uri: "https://#{context.request.headers["Host"]?}#{@@conf.prefix}/callback",
         })
         if res.status_code == 200
           token = JSON.parse(res.body)["access_token"]?
