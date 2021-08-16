@@ -51,6 +51,8 @@ server {
     location /oauth_sso_auth/ {
         proxy_pass http://oauth_sso_auth;
         proxy_set_header Host $host; # required, or redirect won't work correctly.
+        # this is optional, cookie path default to /, you may change it with your requirement
+        #proxy_set_header X-CookiePath "/";
     
         # make this endpoint only accessible to nginx internally, maybe not required?
         location /oauth_sso_auth/check {
