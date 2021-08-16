@@ -81,7 +81,7 @@ module Server
     auth
   end
 
-  def self.check_cookie_auth(cookie, rule) # (return) code, cookie_refresh
+  def self.check_cookie_auth(cookie, rule, path = "/") # (return) code, cookie_refresh
     refresh = nil
 
     auth = Base64.decode cookie.value
@@ -98,7 +98,7 @@ module Server
     return 401, refresh if span > @@conf.cookie.valid_time
 
     if span > @@conf.cookie.refresh_time
-      refresh = refresh_cookie_auth digest_cookie_auth(data)
+      refresh = refresh_cookie_auth digest_cookie_auth(data), path
     end
 
     json = JSON.parse data
@@ -124,19 +124,19 @@ module Server
     return 401, nil # wrong cookie format, auth again
   end
 
-  def self.gen_cookie(name, data)
-    HTTP::Cookie.new(name, data, secure: @@conf.cookie.secure, http_only: true)
+  def self.gen_cookie(name, data, path = "#{@@conf.prefix}/")
+    HTTP::Cookie.new(name, data, path: path, secure: @@conf.cookie.secure, http_only: true)
   end
 
   def self.gen_cookie_back(uri)
     gen_cookie("#{@@conf.cookie.name}XBACK", uri)
   end
 
-  def self.refresh_cookie_auth(auth)
-    gen_cookie(@@conf.cookie.name, Base64.urlsafe_encode(auth, false))
+  def self.refresh_cookie_auth(auth, path = "/")
+    gen_cookie(@@conf.cookie.name, Base64.urlsafe_encode(auth, false), path)
   end
 
-  def self.gen_cookie_auth(json)
+  def self.gen_cookie_auth(json, path = "/")
     obj = JSON.parse json
     gen_cookie(@@conf.cookie.name, Base64.urlsafe_encode(digest_cookie_auth(JSON.build { |json|
       json.object do
@@ -144,13 +144,14 @@ module Server
           json.field f, obj[f]
         end
       end
-    }), false))
+    }), false), path)
   # wrong config or bad oauth server, lazy to handle this
   # (shouldn't happen, or not our fault, isn't it?)
   #rescue JSON::ParseException
   end
 
   def self.handle_request(context)
+    cookie_path = context.request.headers["X-CookiePath"]? || "/"
     case context.request.path
     when /^#{@@conf.prefix}\/check(?:\/(?<rule>.+))?/ # nginx auth_request handler
       rule = $~["rule"]? || context.request.headers["X-AuthRule"]? || "none|=|none"
@@ -158,7 +159,7 @@ module Server
         code = 200
       elsif context.request.cookies.has_key? @@conf.cookie.name
         cookie = context.request.cookies[@@conf.cookie.name]
-        code, refresh = check_cookie_auth cookie, rule
+        code, refresh = check_cookie_auth cookie, rule, cookie_path
         unless refresh.nil?
           context.response.cookies << refresh
         end
@@ -207,7 +208,7 @@ module Server
           else
             res = HTTP::Client.get @@conf.oauth.user_url, HTTP::Headers{"Authorization" => "Bearer #{token.as_s}"}
             if res.status_code == 200
-              context.response.cookies << gen_cookie_auth(res.body)
+              context.response.cookies << gen_cookie_auth res.body, cookie_path
               if context.request.cookies.has_key? "#{@@conf.cookie.name}XBACK"
                 context.response.status_code = 302
                 context.response.headers["Location"] = context.request.cookies["#{@@conf.cookie.name}XBACK"].value
