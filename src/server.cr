@@ -240,7 +240,7 @@ module Server
     unix = @@conf.bind.unix if unix.empty?
     perm = @@conf.bind.perm if perm < 0
 
-    server = HTTP::Server.new([
+    server = @@server = HTTP::Server.new([
       HTTP::ErrorHandler.new ENV["ENV"] == "debug",
     ]) { |context| handle_request context }
 
@@ -254,9 +254,20 @@ module Server
     end
     server.listen
   end
+
+  def self.stop_server
+    @@server.try &.close
+  end
 end
 
 
 ENV["ENV"] ||= "production"
+
+Signal::INT.trap do
+  Server.stop_server
+end
+Signal::TERM.trap do
+  Server.stop_server
+end
 
 Server.start_server
