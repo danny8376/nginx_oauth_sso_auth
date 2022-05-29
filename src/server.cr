@@ -35,6 +35,7 @@ module Server
       property auth_url      : String
       property token_url     : String
       property user_url      : String
+      property ssl_verify    : Bool
       property client_id     : String
       property client_secret : String
       property scope         : String
@@ -193,7 +194,7 @@ module Server
       context.response.print "Redirect to SSO"
     when /^#{@@conf.prefix}\/callback/
       if context.request.query_params.has_key? "code"
-        res = HTTP::Client.post @@conf.oauth.token_url, form: HTTP::Params.encode({
+        res = HTTP::Client.post @@conf.oauth.token_url, tls: @@tls, form: HTTP::Params.encode({
           code: context.request.query_params["code"],
           grant_type: "authorization_code",
           client_id: @@conf.oauth.client_id,
@@ -206,7 +207,7 @@ module Server
             context.response.status_code = 502
             context.response.print "SSO Server error - no token"
           else
-            res = HTTP::Client.get @@conf.oauth.user_url, HTTP::Headers{"Authorization" => "Bearer #{token.as_s}"}
+            res = HTTP::Client.get @@conf.oauth.user_url, HTTP::Headers{"Authorization" => "Bearer #{token.as_s}"}, tls: @@tls
             if res.status_code == 200
               context.response.cookies << gen_cookie_auth res.body, cookie_path
               if context.request.cookies.has_key? "#{@@conf.cookie.name}XBACK"
@@ -244,6 +245,9 @@ module Server
     server = @@server = HTTP::Server.new([
       HTTP::ErrorHandler.new ENV["ENV"] == "debug",
     ]) { |context| handle_request context }
+
+    @@tls = OpenSSL::SSL::Context::Client.new
+    @@tls.not_nil!.verify_mode = OpenSSL::SSL::VerifyMode::NONE if !@@conf.oauth.ssl_verify
 
     if unix.empty?
       puts "Listening on http://#{host}:#{port}"

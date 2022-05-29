@@ -8,6 +8,7 @@ oauth:
   auth_url: https://example.com/oauth2/authorize
   token_url: https://example.com/oauth2/token
   user_url: https://example.com/oauth2/userinfo
+  ssl_verify: true
   client_id: client_id
   client_secret: client_secret
   scope: openid roles
